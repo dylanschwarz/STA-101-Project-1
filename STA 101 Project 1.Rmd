@@ -1,0 +1,224 @@
+
+```{r, echo = FALSE}
+library(readr)
+HospFull <- read.csv("~/Downloads/HospFull.csv")
+options(scipen = 8)
+```
+
+### Introduction
+
+  The goal of this project is to fit the best linear model for prediction of all patients’ length of stay, in days, at the hospital, this being our response variable. Our five explanatory variables are the probability of acquiring an infection (average estimated in percentages), number of cultures performed to number of patients (ratio, times 100), the average number of beds in the hospital during the study, hospital association with a medical school (Y for yes, N for no), and a categorical variable of geographic region (NE for Northeast, NC for North Central, S for South, and W for West) These descriptive characteristics of hospitals in the United States comes from a dataset from Applied  Linear  Statistical  Models,  fifth  edition,  Kutner,  Nachtsheim,  Neter,and Li. The rest of this report contains our results from our tests and diagnostics for model fitting, interpretations, and prediction of the value of our response variable given specific values of our explanatory variables.
+
+
+### Summary
+
+```{r, echo = FALSE}
+summary(HospFull)
+```
+
+The mean length of stay for all patients was 9.65 days.
+
+The average probability of infection was 4.355%
+```{r, echo = FALSE}
+library(ggplot2)
+qplot(Infect, Length, data = HospFull) + ggtitle("Length of Stay vs. Infection") + xlab("Probability of Infection %") + ylab("Length of Stay")
+```
+
+
+The average culture ratio applied was .1579
+```{r, echo = FALSE}
+qplot(Culture, Length, data = HospFull) + ggtitle("Length of Stay vs. Culture Ratio") + xlab("Culture Ratio by 100") + ylab("Length of Stay")
+```
+
+
+The average number of beds was 252.2
+```{r, echo = FALSE}
+qplot(Bed, Length, data = HospFull) + ggtitle("Length of Stay vs. Number of Beds") + xlab("Number of Beds") + ylab("Length of Stay")
+```
+
+
+17 of the 113 hospitals were associated with MedSchools. Those associated with MedSchools had a longer average length of stay.
+```{r, echo = FALSE}
+library(ggplot2)
+ggplot(HospFull, aes(y = Length, x =MedSchool)) + geom_boxplot() + ylab("Length fo Stay") + xlab("MedSchool") + ggtitle("Length of Stay by MedSchool") + coord_flip() 
+```
+
+
+The regions all had a similar number of observations with the West having the least at 16. The North East had the longest average length of stay.
+```{r, echo = FALSE}
+library(ggplot2)
+ggplot(HospFull, aes(y = Length, x =Region)) + geom_boxplot() + ylab("Length fo Stay") + xlab("Region") + ggtitle("Length of Stay by Region") + coord_flip()
+```
+
+
+### Data Preperation
+
+
+```{r, echo = FALSE}
+library(MASS)
+my.model = lm(Length ~ Infect + Culture + Bed + MedSchool + Region, data = HospFull)
+SR.h = stdres(my.model)
+n.hospfull = length(my.model$residuals)
+p.hospfull = length(my.model$coefficients)
+alpha = .01
+t.cutoff.hospfull=qt(1-alpha/2, n.hospfull-p.hospfull)
+outliers.hospfull = which(abs(SR.h) > t.cutoff.hospfull)
+new.data = HospFull[-outliers.hospfull,]
+new.model = lm(Length ~ Infect + Culture + Bed + MedSchool + Region, data =new.data)
+```
+
+Our summary statistics revealed that we may have a few outliers in our dataset. Do determine which value are outliers we standardized our data and used a t-cutoff with an alpha = 0.01, which resulted in a t-cutoff value is 2.62. We found two values above the cutoff in rows 47 and 112, which had a length of stay of 19.56 days and 17.94 days repectively. We removed these data points and now have 111 obervations to move forward with. We removed a total of 1.7% of our data. 
+
+We removed:
+```{r, echo = FALSE}
+HospFull[47,]
+HospFull[112,]
+```
+
+### Model Fitting
+
+```{r, echo = FALSE}
+library(leaps)
+model.x1 = lm(Length ~ Infect, data = new.data)
+model.x15 = lm(Length ~ Infect + Region, data = new.data)
+model.x154 = lm(Length ~ Infect + MedSchool + Region, data = new.data)
+all.models = regsubsets(Length ~ Infect + Culture + Bed + MedSchool + Region, data = new.data, nbest = 2)
+names.of.data = c("Y","X1","X2","X3","X4","X5")
+some.stuff = summary(all.models)
+n= nrow(new.data) 
+K = nrow(some.stuff$which)
+nicer = lapply(1:K,function(i){
+  model = paste(names.of.data[some.stuff$which[i,]],collapse = ",")
+  p = sum(some.stuff$which[i,])
+  BIC = some.stuff$bic[i]
+  CP = some.stuff$cp[i]
+  results = data.frame(model,p,CP,BIC)
+  return(results)
+})
+nicer = Reduce(rbind,nicer)
+Partial.R2 = function(small.model,big.model){
+  SSE1 = sum(small.model$residuals^2)
+  SSE2 = sum(big.model$residuals^2)
+  PR2 = (SSE1 - SSE2)/SSE1
+  return(PR2)
+}
+r2.5.1 = Partial.R2(model.x1, model.x15)
+r2.4.51 = Partial.R2(model.x15, model.x154)
+```
+
+To fit the best correct model, we first performed all subset regressions and recorded the best two model for each model size. Then we found CpMallow and BIC for all 13 models. When trying to find the best "correct" model, we decided to use BIC as our criteria becuase it usually tends to underfit. The best model according to BIC is Y ~ X1 + X4yes + X5NE + X5W. This model would be strange to use because it leaves out the "S" category from the Region categorical variable. When looking at the best models, they all include Region as an explanatory variable, so we thought it was best to include all categories of Region in our model. Additionally, we have used BIC as our criteria which usually fits the smallest model out of the other criteria, so adding the additional variable to account for all Region categories is unlikely to overfit. 
+
+We checked the significance of adding each term in to the model. X1 appeared most important, follwed by X5 and X4.
+
+R2(X5,X1) = `r r2.5.1` which is the reduction in error when adding X5 to a model with only X1. 
+
+R2(X4, X1 + X5) = `r r2.4.51` which is the reduction in error when adding X4 to a model with X1 and X5.
+
+When finding the best model from all subsets regression, interaction terms were not included, so we decided to test if there are any interactions between the variables we found important. We conducted three F-tests for all possible interactions and the lowest p-value from all the tests was 0.06, which is not low enough for us to consider interaction terms important. 
+
+Our final model we are moving forward with is Y ~ X1 + X4yes + X5NE + X5S + X5W, that is Length of stay regressed on probability of infection, MedSchool yes or no, and Region NC, NE, S, or W. 
+
+
+```{r, echo = FALSE}
+model.2 = lm(Length ~ Infect + MedSchool + Region, data = new.data)
+model.3 = lm(Length ~ Infect + MedSchool + Region + Infect*MedSchool, data = new.data)
+model.4 = lm(Length ~ Infect + MedSchool + Region + Infect*Region, data = new.data)
+model.5 = lm(Length ~ Infect + MedSchool + Region + MedSchool*Region, data = new.data)
+final.model = lm(Length ~ Infect + MedSchool + Region, data = new.data)
+```
+
+
+### Diagnostics
+
+To see if our data meets the assumptions of linear regression, we tested for normality and constant variance of the residuals. 
+```{r, echo = FALSE}
+new.data$ei = final.model$residuals
+new.data$yhat = final.model$fitted.values
+ei = final.model$residuals
+the.SWtest = shapiro.test(ei)
+```
+
+
+The Shapiro-Wilks test for normality resulted in a p-value of `r the.SWtest[2]`, which is greater than any reasonable alpha so we fail to reject the null and conclude that the errors are normally distributed. 
+
+Furthermore, the QQ Plot appears normal with about 6 non-normal data points on the higher end. 
+```{r, echo = FALSE}
+qqnorm(final.model$residuals)
+qqline(final.model$residuals)
+```
+
+
+```{r, echo = FALSE}
+Group = rep("Lower",nrow(new.data)) 
+Group[new.data$Length < median(new.data$Length)] = "Upper" 
+Group = as.factor(Group) 
+new.data$Group = Group
+the.FKtest= fligner.test(new.data$ei, new.data$Group)
+```
+
+The Fligner-Killeen test for constant variance resulted in a p-value of `r the.FKtest[3]`, which is larger than any reasonable alpha so we conclude that the residuals have constant variance. 
+
+Additionally the plot of Residuals vs Fitted Values does not have any pattern and appears to be mostly symmetric between the lower and upper have in terms of vertical range. 
+
+```{r, echo = FALSE}
+library(ggplot2)
+qplot(yhat, ei, data = new.data) +  ggtitle("Errors vs. Fitted Values") + xlab("Fitted Values") + 
+  ylab("Errors") + geom_hline(yintercept = 0,col = "purple")
+```
+
+The assumptions of normality and constant variance are met as well as random data so we are able to move on anf find the coefficients for our model. 
+
+### Interpretation
+
+```{r, echo = FALSE}
+anova.t = anova(final.model)
+infect.p = anova.t[1,5]
+med.p = anova.t[2,5]
+reg.p = anova.t[3,5]
+```
+
+The final model from our dataset is Y = 7.2248 + 0.5227X1 + 0.7415X4yes + 0.6741X5NE - 0.1461X5S - 1.4936X5W 
+
+Beta0, the intercept of 7.2248, means that when a patient has an infection probabilty of 0, is not staying at a MedSchool hospital, and is located in the North Central region then the average length of stay is 7.2248 days. 
+
+Beta1 is interpreted as when a persons probablity of infection increases by 1% when the average stay increases by 0.5227 days. 
+
+Beta2 is interpreted as if a patient is staying at a MedSchool hospital then the average stay is 0.7415 days longer than a non-MedSchool hospital. 
+
+Beta3 is interpreted as the average length of stay for a patient in the North East is 0.6741 days longer than in the North Central region. 
+
+Beta4 is interpreted as the average length of stay for a patient in the South is 0.1461 days shorter than in the North Centeral region. 
+
+Beta5 is interpreted as the average length of stay for a patient in the West is 1.4936 days shorter than in the North Central region. 
+
+While this model was chosen to be the best "correct" model, we tested the significance of each variable to make sure they are all important and we do not have unecessary variables.  
+
+The p-value for Infect is `r infect.p`, meaning if Beta1 = 0, or X1 is insignificant, then we would observe our data or more extreme with probability `r infect.p`. 
+
+The p-value for MedSchool is `r med.p`, meaning if Beta2 = 0, or X4 is insignificant, then we would observe our data or more extreme with probability `r med.p`.
+
+The p-value for Region categorical variable is `r reg.p`, meaning if Beta3 = Beta4 = Beta5 = 0, or X5NE, X5S, and X5W are all insignificant, then we would observe our data or more extreme with probability `r reg.p`. 
+
+All of these p-values are less than any reasonalbe alpha, so we conclude that all explanatory variables that we have chosen are significant in predicting Length of stay. 
+
+
+
+### Prediction
+
+Y = 7.2248 + 0.5227X1 + 0.7415X4,yes +  0.6741X5,NE - 0.1461X5,S - 1.4936X5,W
+
+Y = 7.2248 + 0.5227(4) + 0.7415(0) +  0.6741(0) - 0.1461(0) -1.4936(1)
+
+Y = 7.822 days or about 8 days
+
+The average length or stay predicted from our model with a patient that has 4% probability of getting an infection, with a culture ratio of .14 performed, 190 beds in the hospital, and is located in the West is 7.822 days. 
+
+### Conclusion
+
+When trying to find the best "correct" model, we performed all subsets regressions and found that the probability of acquiring an infection(X1) was the most important variable in determining length of stay, in days, at a hospital. The next most important variables were hospital location(X5), and whether or not the hospital was associated with a medical school(X4). When adding X5, to a model with just X1, we found that the model error decreased by 28.45%, and when adding X4 to a model with both X1  and X5, we found that it reduced our error by an additional 5.88%. We did not find any interaction terms to be important in predicting length of stay. 
+
+
+
+### R Appendix
+```{r, ref.label=knitr::all_labels(),echo=TRUE,eval=FALSE}
+```
